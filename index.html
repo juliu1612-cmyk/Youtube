@@ -734,7 +734,6 @@
             <div class="status-info">
                 <div class="status-dot"></div>
                 <span id="serverStatus">服务运行中</span>
-                <span id="ffmpegStatus"></span>
             </div>
             <span id="downloadDir"></span>
         </div>
@@ -795,15 +794,8 @@
                     }
                     document.getElementById('downloadDir').textContent = '📁 ' + data.download_dir;
                     document.getElementById('downloadDirInput').value = data.download_dir;
-                    document.getElementById('ffmpegStatus').textContent = data.ffmpeg_available
-                        ? '· FFmpeg 已就绪'
-                        : '· FFmpeg 未安装（高清合并可能失败）';
                     if (data.proxy) {
                         document.getElementById('proxyInput').value = data.proxy;
-                    }
-                    // Show proxy warning if no proxy and ffmpeg not available
-                    if (!data.proxy) {
-                        document.getElementById('ffmpegStatus').textContent += ' · 未配置代理';
                     }
                 }
             } catch (e) {
@@ -833,10 +825,6 @@
                 if (data.success) {
                     showToast(proxy ? '代理已保存' : '已清除代理设置', 'success');
                     closeSettings();
-                    // Update status display
-                    if (proxy) {
-                        document.getElementById('ffmpegStatus').textContent = document.getElementById('ffmpegStatus').textContent.replace('· 未配置代理', '· 代理已配置');
-                    }
                 } else {
                     showToast('保存失败', 'error');
                 }

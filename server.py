@@ -255,6 +255,28 @@ def _format_speed(speed):
         return f"{speed / 1024 / 1024:.1f} MiB/s"
 
 
+def _clean_part_suffix(filepath):
+    """Remove .part suffix from filepath and rename the actual file if needed.
+
+    yt-dlp creates temporary .part files during download. In some cases (e.g.
+    when the download is a single pre-merged format), the 'finished' callback
+    may report a filename still ending in .part. This ensures the final file
+    has a clean extension.
+    """
+    if not filepath or not filepath.endswith('.part'):
+        return filepath
+    clean_path = filepath[:-5]
+    try:
+        if os.path.exists(filepath) and not os.path.exists(clean_path):
+            os.rename(filepath, clean_path)
+        elif os.path.exists(clean_path) and os.path.exists(filepath):
+            # Final file already exists, remove leftover .part
+            os.remove(filepath)
+        return clean_path
+    except Exception:
+        return filepath
+
+
 def _format_eta(eta):
     """Format ETA in human-readable form."""
     if eta is None or eta < 0:
@@ -404,7 +426,7 @@ def start_download(url, quality, download_id):
                         downloads[download_id]['progress'] = 100
                         filename = d.get('filename', '')
                         if filename:
-                            downloads[download_id]['filepath'] = filename
+                            downloads[download_id]['filepath'] = _clean_part_suffix(filename)
 
             ydl_opts = {
                 'format': fmt,
@@ -464,7 +486,7 @@ def start_download(url, quality, download_id):
                     if requested_downloads:
                         filepath = requested_downloads[0].get('filepath', '')
                         if filepath:
-                            downloads[download_id]['filepath'] = filepath
+                            downloads[download_id]['filepath'] = _clean_part_suffix(filepath)
                     elif not downloads[download_id].get('filepath'):
                         # Fallback: construct from info
                         ext = info.get('ext', 'mp4')
