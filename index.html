@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Downloader</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #f5f5f7;
+            --surface: #ffffff;
+            --surface-hover: #f0f0f3;
+            --text: #1d1d1f;
+            --text-secondary: #86868b;
+            --text-tertiary: #aeaeb2;
+            --accent: #0071e3;
+            --accent-hover: #0077ed;
+            --accent-light: #e8f1fd;
+            --success: #34c759;
+            --success-light: #e8f9ed;
+            --error: #ff3b30;
+            --error-light: #fff0ef;
+            --warning: #ff9500;
+            --border: #d2d2d7;
+            --border-light: #e8e8ed;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 4px 12px rgba(0,0,0,0.04);
+            --shadow-lg: 0 8px 32px rgba(0,0,0,0.12);
+            --transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Helvetica Neue', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* --- Title Bar --- */
+        .title-bar {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border-light);
+            -webkit-app-region: drag;
+            position: relative;
+            z-index: 100;
+        }
+
+        /* On Windows, pywebview provides its own title bar — hide our custom one */
+        body.platform-win32 .title-bar {
+            display: none;
+        }
+        body.platform-win32 .container {
+            height: 100vh;
+        }
+
+        .traffic-lights {
+            display: flex;
+            gap: 8px;
+            -webkit-app-region: no-drag;
+        }
+
+        .traffic-light {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: opacity var(--transition);
+        }
+        .traffic-light.close { background: #ff5f57; }
+        .traffic-light.minimize { background: #febc2e; }
+        .traffic-light.maximize { background: #28c840; }
+
+        .traffic-lights:hover .traffic-light::after {
+            content: '';
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .title-text {
+            flex: 1;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: -0.2px;
+        }
+
+        /* --- Main Container --- */
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 41px);
+            padding: 24px;
+            gap: 20px;
+            overflow-y: auto;
+        }
+
+        /* --- Input Section --- */
+        .input-section {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+        }
+
+        .input-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .logo {
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #ff0000, #cc0000);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 18px;
+        }
+
+        .input-header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .url-input-row {
+            display: flex;
+            gap: 10px;
+        }
+
+        .url-input {
+            flex: 1;
+            padding: 10px 14px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-family: inherit;
+            background: var(--bg);
+            color: var(--text);
+            transition: var(--transition);
+            outline: none;
+        }
+
+        .url-input:focus {
+            border-color: var(--accent);
+            background: var(--surface);
+            box-shadow: 0 0 0 3px var(--accent-light);
+        }
+
+        .url-input::placeholder {
+            color: var(--text-tertiary);
+        }
+
+        .btn {
+            padding: 10px 18px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-weight: 600;
+            font-family: inherit;
+            cursor: pointer;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        .btn-primary:hover { background: var(--accent-hover); }
+        .btn-primary:active { transform: scale(0.97); }
+        .btn-primary:disabled {
+            background: var(--text-tertiary);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: var(--surface-hover);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover { background: var(--border-light); }
+
+        .btn-text {
+            background: transparent;
+            color: var(--accent);
+            padding: 6px 10px;
+        }
+        .btn-text:hover { background: var(--accent-light); }
+
+        /* --- Video Info Card --- */
+        .video-info {
+            display: none;
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 16px;
+            box-shadow: var(--shadow);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .video-info.visible { display: block; }
+
+        .video-info-row {
+            display: flex;
+            gap: 16px;
+        }
+
+        .video-thumbnail {
+            width: 200px;
+            height: 112px;
+            border-radius: var(--radius-sm);
+            object-fit: cover;
+            background: var(--border-light);
+            flex-shrink: 0;
+        }
+
+        .video-details {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 0;
+        }
+
+        .video-title {
+            font-size: 15px;
+            font-weight: 600;
+            line-height: 1.3;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .video-meta {
+            display: flex;
+            gap: 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .video-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .quality-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .quality-label {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .quality-options {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+
+        .quality-option {
+            padding: 5px 12px;
+            border-radius: 16px;
+            border: 1.5px solid var(--border);
+            background: var(--surface);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            font-family: inherit;
+            color: var(--text);
+        }
+
+        .quality-option:hover {
+            border-color: var(--accent);
+        }
+
+        .quality-option.selected {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
+        .download-btn-row {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 12px;
+            gap: 8px;
+        }
+
+        /* --- Downloads Section --- */
+        .downloads-section {
+            flex: 1;
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .section-header h2 {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .download-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+            flex: 1;
+            padding-right: 4px;
+        }
+
+        .download-list::-webkit-scrollbar {
+            width: 6px;
+        }
+        .download-list::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        .download-item {
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            padding: 14px 16px;
+            box-shadow: var(--shadow);
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            animation: slideIn 0.3s ease;
+        }
+
+        .download-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 16px;
+        }
+
+        .download-icon.downloading {
+            background: var(--accent-light);
+            color: var(--accent);
+        }
+        .download-icon.completed {
+            background: var(--success-light);
+            color: var(--success);
+        }
+        .download-icon.error {
+            background: var(--error-light);
+            color: var(--error);
+        }
+
+        .download-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .download-title {
+            font-size: 13px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .download-status-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .progress-bar-container {
+            flex: 1;
+            height: 4px;
+            background: var(--border-light);
+            border-radius: 2px;
+            overflow: hidden;
+            min-width: 100px;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: width 0.3s ease;
+            width: 0%;
+        }
+
+        .progress-bar.completed { background: var(--success); }
+        .progress-bar.error { background: var(--error); }
+
+        .download-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .icon-btn {
+            width: 28px;
+            height: 28px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            color: var(--text-secondary);
+            transition: var(--transition);
+        }
+
+        .icon-btn:hover {
+            background: var(--surface-hover);
+            color: var(--text);
+        }
+
+        /* --- Empty State --- */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-tertiary);
+        }
+
+        .empty-state .emoji {
+            font-size: 40px;
+            margin-bottom: 12px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+        }
+
+        /* --- Status Bar --- */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .status-bar .status-info {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--success);
+        }
+
+        /* --- Loading Spinner --- */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-light);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* --- Settings Modal --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.3);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+        }
+        .modal-overlay.visible { display: flex; }
+
+        .modal {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 24px;
+            width: 440px;
+            max-width: 90%;
+            box-shadow: var(--shadow-lg);
+            animation: slideIn 0.2s ease;
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 16px;
+            font-weight: 700;
+        }
+
+        .modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: var(--text);
+        }
+
+        .form-group .hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+            line-height: 1.5;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1.5px solid var(--border);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-family: inherit;
+            background: var(--bg);
+            color: var(--text);
+            transition: var(--transition);
+            outline: none;
+        }
+        .form-group input:focus {
+            border-color: var(--accent);
+            background: var(--surface);
+            box-shadow: 0 0 0 3px var(--accent-light);
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+            margin-top: 20px;
+        }
+
+        .info-banner {
+            background: var(--accent-light);
+            border-radius: var(--radius-sm);
+            padding: 10px 12px;
+            font-size: 12px;
+            color: var(--accent);
+            line-height: 1.5;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        /* --- Toast --- */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--text);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+            pointer-events: none;
+        }
+
+        .toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .toast.error { background: var(--error); }
+        .toast.success { background: var(--success); }
+
+        /* --- Responsive --- */
+        @media (max-width: 600px) {
+            .video-thumbnail { width: 120px; height: 68px; }
+            .container { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Title Bar -->
+    <div class="title-bar">
+        <div class="traffic-lights">
+            <div class="traffic-light close"></div>
+            <div class="traffic-light minimize"></div>
+            <div class="traffic-light maximize"></div>
+        </div>
+        <div class="title-text">YouTube Downloader</div>
+        <button class="icon-btn" style="position:absolute;right:16px;-webkit-app-region:no-drag;" title="设置" onclick="openSettings()">⚙️</button>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Input Section -->
+        <div class="input-section">
+            <div class="input-header">
+                <div class="logo">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="white">
+                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+                    </svg>
+                </div>
+                <h1>YouTube 视频下载器</h1>
+            </div>
+            <div class="url-input-row">
+                <input
+                    type="text"
+                    class="url-input"
+                    id="urlInput"
+                    placeholder="粘贴 YouTube 视频链接，如 https://www.youtube.com/watch?v=..."
+                    autocomplete="off"
+                >
+                <button class="btn btn-primary" id="fetchBtn" onclick="fetchVideoInfo()">
+                    解析视频
+                </button>
+            </div>
+        </div>
+
+        <!-- Video Info Card -->
+        <div class="video-info" id="videoInfo">
+            <div class="video-info-row">
+                <img class="video-thumbnail" id="videoThumbnail" src="" alt="thumbnail">
+                <div class="video-details">
+                    <div class="video-title" id="videoTitle"></div>
+                    <div class="video-meta">
+                        <span id="videoUploader"></span>
+                        <span id="videoDuration"></span>
+                        <span id="videoViews"></span>
+                    </div>
+                    <div class="quality-row">
+                        <span class="quality-label">画质：</span>
+                        <div class="quality-options" id="qualityOptions">
+                            <button class="quality-option selected" data-quality="best">最佳</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="download-btn-row">
+                <button class="btn btn-secondary" onclick="cancelVideoInfo()">取消</button>
+                <button class="btn btn-primary" id="downloadBtn" onclick="startDownload()">
+                    下载视频
+                </button>
+            </div>
+        </div>
+
+        <!-- Downloads Section -->
+        <div class="downloads-section">
+            <div class="section-header">
+                <h2>下载列表</h2>
+                <button class="btn btn-text" onclick="openDownloadFolder()">
+                    打开下载文件夹
+                </button>
+            </div>
+            <div class="download-list" id="downloadList">
+                <div class="empty-state">
+                    <div class="emoji">📥</div>
+                    <p>还没有下载任务，粘贴链接开始吧</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-info">
+                <div class="status-dot"></div>
+                <span id="serverStatus">服务运行中</span>
+                <span id="ffmpegStatus"></span>
+            </div>
+            <span id="downloadDir"></span>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>设置</h3>
+                <button class="icon-btn" onclick="closeSettings()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="info-banner">
+                    <span>💡</span>
+                    <span>在中国大陆访问 YouTube 需要代理/VPN。请填写你的代理地址（如 Clash/V2Ray 的本地端口），留空则使用系统默认代理。</span>
+                </div>
+                <div class="form-group">
+                    <label>代理地址</label>
+                    <input type="text" id="proxyInput" placeholder="http://127.0.0.1:7890" autocomplete="off">
+                    <div class="hint">
+                        常见代理端口：Clash 默认 7890，V2Ray 默认 1080/1087，SSR 默认 1080<br>
+                        示例：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>下载路径</label>
+                    <input type="text" id="downloadDirInput" readonly>
+                    <div class="hint">视频默认保存到 ~/Downloads/YouTubeDownloader/</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeSettings()">取消</button>
+                <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script>
+        let currentVideoInfo = null;
+        let selectedQuality = 'best';
+        let pollTimer = null;
+        let pollInterval = 1000;
+        let renderedItems = new Map(); // download id -> DOM element
+
+        // --- Initialize ---
+        async function init() {
+            try {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                if (data.success) {
+                    // Apply platform-specific styling
+                    if (data.platform) {
+                        document.body.classList.add('platform-' + data.platform);
+                    }
+                    document.getElementById('downloadDir').textContent = '📁 ' + data.download_dir;
+                    document.getElementById('downloadDirInput').value = data.download_dir;
+                    document.getElementById('ffmpegStatus').textContent = data.ffmpeg_available
+                        ? '· FFmpeg 已就绪'
+                        : '· FFmpeg 未安装（高清合并可能失败）';
+                    if (data.proxy) {
+                        document.getElementById('proxyInput').value = data.proxy;
+                    }
+                    // Show proxy warning if no proxy and ffmpeg not available
+                    if (!data.proxy) {
+                        document.getElementById('ffmpegStatus').textContent += ' · 未配置代理';
+                    }
+                }
+            } catch (e) {
+                console.error('Config fetch error:', e);
+            }
+            startPolling();
+        }
+
+        // --- Settings ---
+        function openSettings() {
+            document.getElementById('settingsModal').classList.add('visible');
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.remove('visible');
+        }
+
+        async function saveSettings() {
+            const proxy = document.getElementById('proxyInput').value.trim();
+            try {
+                const res = await fetch('/api/proxy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ proxy })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(proxy ? '代理已保存' : '已清除代理设置', 'success');
+                    closeSettings();
+                    // Update status display
+                    if (proxy) {
+                        document.getElementById('ffmpegStatus').textContent = document.getElementById('ffmpegStatus').textContent.replace('· 未配置代理', '· 代理已配置');
+                    }
+                } else {
+                    showToast('保存失败', 'error');
+                }
+            } catch (e) {
+                showToast('网络错误', 'error');
+            }
+        }
+
+        // Close modal on overlay click
+        document.getElementById('settingsModal').addEventListener('click', function(e) {
+            if (e.target === this) closeSettings();
+        });
+
+        // --- Toast ---
+        function showToast(msg, type = '') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'toast show ' + type;
+            setTimeout(() => {
+                toast.className = 'toast ' + type;
+            }, 2500);
+        }
+
+        // --- Fetch Video Info ---
+        async function fetchVideoInfo() {
+            const url = document.getElementById('urlInput').value.trim();
+            if (!url) {
+                showToast('请输入 YouTube 视频链接', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('fetchBtn');
+            const originalText = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner"></span> 解析中...';
+
+            try {
+                const res = await fetch('/api/info', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    displayVideoInfo(data);
+                    showToast('解析成功', 'success');
+                } else {
+                    showToast(data.error || '解析失败', 'error');
+                }
+            } catch (e) {
+                showToast('网络错误：' + e.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalText;
+            }
+        }
+
+        function displayVideoInfo(info) {
+            currentVideoInfo = info;
+            const card = document.getElementById('videoInfo');
+            card.classList.add('visible');
+
+            document.getElementById('videoThumbnail').src = info.thumbnail || '';
+            document.getElementById('videoTitle').textContent = info.title;
+            document.getElementById('videoUploader').textContent = '👤 ' + (info.uploader || 'Unknown');
+
+            if (info.duration) {
+                const mins = Math.floor(info.duration / 60);
+                const secs = info.duration % 60;
+                document.getElementById('videoDuration').textContent = `⏱ ${mins}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            if (info.view_count) {
+                document.getElementById('videoViews').textContent = '👁 ' + formatNumber(info.view_count);
+            }
+
+            // Build quality options
+            const qualityContainer = document.getElementById('qualityOptions');
+            qualityContainer.innerHTML = '';
+
+            // Add "Audio Only" option
+            const audioBtn = document.createElement('button');
+            audioBtn.className = 'quality-option';
+            audioBtn.textContent = 'MP3';
+            audioBtn.dataset.quality = 'audio';
+            audioBtn.onclick = () => selectQuality('audio', audioBtn);
+            qualityContainer.appendChild(audioBtn);
+
+            // Add quality options
+            if (info.quality_options && info.quality_options.length > 0) {
+                info.quality_options.forEach(q => {
+                    const btn = document.createElement('button');
+                    btn.className = 'quality-option';
+                    btn.textContent = q.label;
+                    btn.dataset.quality = q.height + 'p';
+                    btn.onclick = () => selectQuality(q.height + 'p', btn);
+                    qualityContainer.appendChild(btn);
+                });
+            }
+
+            // Add "Best" option
+            const bestBtn = document.createElement('button');
+            bestBtn.className = 'quality-option selected';
+            bestBtn.textContent = '最佳';
+            bestBtn.dataset.quality = 'best';
+            bestBtn.onclick = () => selectQuality('best', bestBtn);
+            qualityContainer.appendChild(bestBtn);
+
+            selectedQuality = 'best';
+        }
+
+        function selectQuality(quality, btn) {
+            selectedQuality = quality;
+            document.querySelectorAll('.quality-option').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+        }
+
+        function cancelVideoInfo() {
+            document.getElementById('videoInfo').classList.remove('visible');
+            currentVideoInfo = null;
+        }
+
+        // --- Download ---
+        async function startDownload() {
+            if (!currentVideoInfo) return;
+
+            const url = currentVideoInfo.webpage_url || document.getElementById('urlInput').value.trim();
+
+            try {
+                const res = await fetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url, quality: selectedQuality })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    showToast('下载已开始', 'success');
+                    cancelVideoInfo();
+                    document.getElementById('urlInput').value = '';
+                } else {
+                    showToast(data.error || '下载失败', 'error');
+                }
+            } catch (e) {
+                showToast('网络错误：' + e.message, 'error');
+            }
+        }
+
+        // --- Poll Downloads ---
+        function startPolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            pollInterval = 1000;
+            pollTimer = setInterval(fetchDownloads, pollInterval);
+            fetchDownloads();
+        }
+
+        async function fetchDownloads() {
+            try {
+                const res = await fetch('/api/downloads');
+                const data = await res.json();
+                if (data.success) {
+                    renderDownloads(data.downloads);
+                    // Smart polling: 1s when downloading, 5s when idle
+                    const hasActive = data.downloads.some(d => d.status === 'preparing' || d.status === 'downloading');
+                    const desired = hasActive ? 1000 : 5000;
+                    if (desired !== pollInterval) {
+                        pollInterval = desired;
+                        clearInterval(pollTimer);
+                        pollTimer = setInterval(fetchDownloads, pollInterval);
+                    }
+                }
+            } catch (e) {}
+        }
+
+        function renderDownloads(items) {
+            const list = document.getElementById('downloadList');
+
+            // Empty list
+            if (!items || items.length === 0) {
+                if (renderedItems.size > 0) {
+                    list.innerHTML = '<div class="empty-state"><div class="emoji">📥</div><p>还没有下载任务，粘贴链接开始吧</p></div>';
+                    renderedItems.clear();
+                }
+                return;
+            }
+
+            // Remove empty state if present
+            const emptyState = list.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            // Sort: downloading first, then by started_at desc
+            items.sort((a, b) => {
+                const order = { 'preparing': 0, 'downloading': 1, 'completed': 2, 'error': 3 };
+                return (order[a.status] || 99) - (order[b.status] || 99) || b.started_at - a.started_at;
+            });
+
+            const currentIds = new Set(items.map(i => i.id));
+
+            // Remove DOM elements for deleted items
+            for (const [id, el] of renderedItems) {
+                if (!currentIds.has(id)) {
+                    el.remove();
+                    renderedItems.delete(id);
+                }
+            }
+
+            items.forEach((item, index) => {
+                let el = renderedItems.get(item.id);
+                const prevStatus = el ? el.dataset.status : null;
+                const statusChanged = prevStatus !== item.status;
+
+                if (!el) {
+                    // Create new element (only runs once per download)
+                    el = document.createElement('div');
+                    el.className = 'download-item';
+                    list.appendChild(el);
+                    renderedItems.set(item.id, el);
+                }
+
+                if (statusChanged) {
+                    // Status changed (or new item) — rebuild inner structure
+                    el.dataset.status = item.status;
+
+                    let iconClass, iconText, statusText, progressBarClass = '';
+
+                    if (item.status === 'preparing') {
+                        iconClass = 'downloading';
+                        iconText = '⏳';
+                        statusText = '准备中...';
+                    } else if (item.status === 'downloading') {
+                        iconClass = 'downloading';
+                        iconText = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span>';
+                        statusText = `${item.progress.toFixed(1)}% · ${item.speed} · ETA: ${item.eta}`;
+                    } else if (item.status === 'completed') {
+                        iconClass = 'completed';
+                        iconText = '✓';
+                        statusText = '下载完成';
+                        progressBarClass = 'completed';
+                    } else {
+                        iconClass = 'error';
+                        iconText = '✕';
+                        statusText = item.error || '下载失败';
+                        progressBarClass = 'error';
+                    }
+
+                    const progress = item.status === 'completed' ? 100 : (item.progress || 0);
+                    const showProgress = ['downloading', 'preparing', 'completed'].includes(item.status);
+
+                    let actions = '';
+                    if (item.status === 'completed' && item.filepath) {
+                        actions = `<button class="icon-btn" title="在文件夹中显示" onclick="revealFile('${item.id}')">📁</button><button class="icon-btn" title="清除" onclick="clearDownload('${item.id}')">✕</button>`;
+                    } else if (item.status === 'error') {
+                        actions = `<button class="icon-btn" title="清除" onclick="clearDownload('${item.id}')">✕</button>`;
+                    }
+
+                    el.innerHTML = `
+                        <div class="download-icon ${iconClass}">${iconText}</div>
+                        <div class="download-info">
+                            <div class="download-title">${escapeHtml(item.title)}</div>
+                            <div class="download-status-row">
+                                ${showProgress ? `<div class="progress-bar-container"><div class="progress-bar ${progressBarClass}" style="width: ${progress}%"></div></div>` : ''}
+                                <span class="status-text">${escapeHtml(statusText)}</span>
+                            </div>
+                        </div>
+                        <div class="download-actions">${actions}</div>
+                    `;
+                } else {
+                    // Status unchanged — update only dynamic fields in-place (NO DOM rebuild)
+                    const progress = item.status === 'completed' ? 100 : (item.progress || 0);
+                    const progressBar = el.querySelector('.progress-bar');
+                    if (progressBar) {
+                        progressBar.style.width = progress + '%';
+                    }
+                    if (item.status === 'downloading') {
+                        const statusSpan = el.querySelector('.status-text');
+                        if (statusSpan) {
+                            statusSpan.textContent = `${item.progress.toFixed(1)}% · ${item.speed} · ETA: ${item.eta}`;
+                        }
+                    }
+                }
+
+                // Reorder if sort position changed
+                if (list.children[index] !== el) {
+                    list.insertBefore(el, list.children[index]);
+                }
+            });
+        }
+
+        async function clearDownload(id) {
+            try {
+                await fetch('/api/clear', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ id })
+                });
+                fetchDownloads();
+            } catch (e) {}
+        }
+
+        async function revealFile(id) {
+            try {
+                const res = await fetch('/api/downloads');
+                const data = await res.json();
+                const item = data.downloads.find(d => d.id === id);
+                if (item && item.filepath) {
+                    // Use /api/open-downloads as fallback
+                    await fetch('/api/open-downloads', { method: 'GET' });
+                }
+            } catch (e) {}
+        }
+
+        async function openDownloadFolder() {
+            try {
+                await fetch('/api/open-downloads', { method: 'GET' });
+            } catch (e) {
+                showToast('无法打开文件夹', 'error');
+            }
+        }
+
+        // --- Utilities ---
+        function formatNumber(n) {
+            if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+            return n.toString();
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text || '';
+            return div.innerHTML;
+        }
+
+        // --- Keyboard Shortcuts ---
+        document.getElementById('urlInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                fetchVideoInfo();
+            }
+        });
+
+        // Paste detection
+        document.getElementById('urlInput').addEventListener('paste', (e) => {
+            setTimeout(() => {
+                const url = e.target.value.trim();
+                if (url.includes('youtube.com') || url.includes('youtu.be')) {
+                    fetchVideoInfo();
+                }
+            }, 100);
+        });
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

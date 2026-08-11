@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.dmg
+*.egg-info/
+.DS_Store
+dmg-stage/
+installer_output/
