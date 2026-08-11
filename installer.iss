@@ -5,7 +5,6 @@
 AppName=YouTube Downloader
 AppVersion=1.0.0
 AppPublisher=YouTube Downloader
-AppDescription=Download YouTube videos to your computer
 DefaultDirName={autopf}\YouTubeDownloader
 DefaultGroupName=YouTube Downloader
 DisableProgramGroupPage=yes
