@@ -20,9 +20,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install yt-dlp pywebview pyinstaller
 
-      - name: Build macOS .app
+      - name: Build macOS .app (universal2 - supports Intel & Apple Silicon)
         run: |
-          pyinstaller YouTubeDownloader_Mac.spec --noconfirm --clean
+          pyinstaller YouTubeDownloader_Mac.spec --noconfirm --clean --target-arch=universal2
 
       - name: Create .dmg
         run: |
