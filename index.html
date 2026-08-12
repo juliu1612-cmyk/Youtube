@@ -776,6 +776,24 @@
                     </div>
                     <div class="hint">点击「选择」按钮更改下载位置</div>
                 </div>
+                <div class="form-group">
+                    <label>YouTube 验证（反机器人）</label>
+                    <div id="cookieStatusBox" style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);margin-bottom:10px;">
+                        <div id="cookieStatusText" style="font-size:14px;">检测中...</div>
+                    </div>
+                    <select id="cookieSourceSelect" onchange="onCookieSourceChange()" style="padding:8px 10px;border-radius:6px;background:rgba(0,0,0,0.3);color:inherit;border:1px solid rgba(255,255,255,0.15);width:100%;">
+                        <option value="none">不使用 cookies（可能被 YouTube 拦截）</option>
+                    </select>
+                    <div id="cookieFileRow" style="display:none;margin-top:10px;">
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="text" id="cookieFileInput" readonly placeholder="选择 cookies.txt 文件" style="flex:1;">
+                            <button class="btn btn-secondary" onclick="selectCookieFile()" style="white-space:nowrap;font-size:13px;padding:6px 14px;flex-shrink:0;">📄 选择</button>
+                        </div>
+                    </div>
+                    <div class="hint">
+                        YouTube 会拦截没登录状态的请求。推荐使用已登录 YouTube 的浏览器 cookie，yt-dlp 会自动读取。如本机浏览器访问不到 YouTube，可上传通过 <a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank" style="color:#4a9eff;">Get cookies.txt LOC</a> 等扩展导出的 cookies.txt 文件。
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeSettings()">取消</button>
@@ -813,6 +831,11 @@
                     document.getElementById('downloadDir').textContent = '📁 ' + data.download_dir;
                     document.getElementById('downloadDirInput').value = data.download_dir;
                     updateProxyUI(data.proxy, data.proxy_mode, data.proxy_auto_url);
+                    populateCookieOptions(
+                        data.available_browsers || [],
+                        data.cookies_source || 'none',
+                        data.cookies_file || ''
+                    );
                 }
             } catch (e) {
                 console.error('Config fetch error:', e);
@@ -937,22 +960,132 @@
             const isManual = manualBox.style.display !== 'none';
             const proxy = document.getElementById('proxyInput').value.trim();
             const mode = isManual ? 'manual' : 'auto';
+            const cookieSource = document.getElementById('cookieSourceSelect').value;
+            const cookieFile = document.getElementById('cookieFileInput').value.trim();
             try {
-                const res = await fetch('/api/proxy', {
+                // Save proxy first
+                const proxyRes = await fetch('/api/proxy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mode: mode, proxy: proxy })
                 });
-                const data = await res.json();
-                if (data.success) {
-                    showToast(mode === 'auto' ? '已切换到自动检测模式' : '代理已保存', 'success');
+                const proxyData = await proxyRes.json();
+
+                // Save cookies
+                const cookieRes = await fetch('/api/cookies', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ source: cookieSource, file_path: cookieFile })
+                });
+                const cookieData = await cookieRes.json();
+
+                if (proxyData.success && cookieData.success) {
+                    showToast('设置已保存', 'success');
                     closeSettings();
                 } else {
-                    showToast('保存失败', 'error');
+                    const err = cookieData.error || proxyData.error || '保存失败';
+                    showToast(err, 'error');
                 }
             } catch (e) {
                 showToast('网络错误', 'error');
             }
+        }
+
+        // --- Cookie / Anti-bot settings ---
+        const BROWSER_LABELS = {
+            chrome:  '🌱 Chrome',
+            safari:  '🧭 Safari',
+            firefox: '🦊 Firefox',
+            edge:    '🔵 Microsoft Edge',
+            brave:   '🦁 Brave',
+            chromium:'🟢 Chromium',
+            opera:   '🔴 Opera',
+            vivaldi: '💎 Vivaldi',
+            file:    '📄 上传 cookies.txt 文件',
+        };
+
+        function populateCookieOptions(available, currentSource, currentFile) {
+            const sel = document.getElementById('cookieSourceSelect');
+            sel.innerHTML = '';
+            // Always-available "none" option
+            const noneOpt = document.createElement('option');
+            noneOpt.value = 'none';
+            noneOpt.textContent = '不使用（可能被 YouTube 拦截）';
+            sel.appendChild(noneOpt);
+            // Browsers detected on this machine
+            for (const b of available) {
+                const opt = document.createElement('option');
+                opt.value = b;
+                opt.textContent = BROWSER_LABELS[b] || b;
+                sel.appendChild(opt);
+            }
+            // File upload fallback
+            const fileOpt = document.createElement('option');
+            fileOpt.value = 'file';
+            fileOpt.textContent = BROWSER_LABELS.file;
+            sel.appendChild(fileOpt);
+
+            sel.value = currentSource && [...sel.options].some(o => o.value === currentSource)
+                ? currentSource
+                : 'none';
+            document.getElementById('cookieFileInput').value = currentFile || '';
+            onCookieSourceChange();
+            updateCookieUI(currentSource, currentFile, available);
+        }
+
+        function onCookieSourceChange() {
+            const sel = document.getElementById('cookieSourceSelect').value;
+            document.getElementById('cookieFileRow').style.display = sel === 'file' ? '' : 'none';
+        }
+
+        function updateCookieUI(source, filePath, available) {
+            const statusBox = document.getElementById('cookieStatusBox');
+            const statusText = document.getElementById('cookieStatusText');
+            let label = BROWSER_LABELS[source] || source;
+            if (source === 'none') {
+                statusBox.style.borderColor = 'rgba(255, 165, 0, 0.4)';
+                statusText.innerHTML = '⚠️ <strong style="color:#ffa940;">未配置 cookies</strong><br><span style="opacity:0.7;font-size:12px;">YouTube 可能拦截请求并报「Sign in to confirm you\'re not a bot」</span>';
+            } else if (source === 'file') {
+                statusBox.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+                statusText.innerHTML = `✅ <strong style="color:#4ade80;">已加载 cookies.txt</strong><br><span style="opacity:0.7;font-size:12px;">${filePath || ''}</span>`;
+            } else {
+                statusBox.style.borderColor = 'rgba(74, 222, 128, 0.4)';
+                statusText.innerHTML = `✅ <strong style="color:#4ade80;">将使用 ${label} 的登录 cookie</strong><br><span style="opacity:0.7;font-size:12px;">请确保该浏览器已登录 YouTube</span>`;
+            }
+        }
+
+        async function selectCookieFile() {
+            // Try pywebview native dialog first
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.select_file) {
+                try {
+                    const result = await window.pywebview.api.select_file([
+                        ('cookies.txt', '*.txt;*.cookies'),
+                        ('All files', '*.*'),
+                    ]);
+                    if (result && result.success && result.path) {
+                        document.getElementById('cookieFileInput').value = result.path;
+                        return;
+                    }
+                    if (result && !result.success && result.error && result.error !== '未选择文件') {
+                        showToast(result.error, 'error');
+                        return;
+                    }
+                } catch (e) {
+                    console.error('pywebview select_file failed:', e);
+                }
+            }
+            // Browser fallback: hidden file input
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.txt,.cookies,text/plain';
+            input.onchange = () => {
+                if (input.files && input.files[0]) {
+                    // In browser, we can't get the real path — show filename
+                    document.getElementById('cookieFileInput').value = '[浏览器模式] ' + input.files[0].name;
+                    showToast('注意：浏览器内文件上传受限，建议使用桌面窗口模式', 'error');
+                }
+            };
+            input.click();
         }
 
         // Close modal on overlay click

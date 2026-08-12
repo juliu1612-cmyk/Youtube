@@ -53,6 +53,80 @@ download_state = {"dir": os.path.join(os.path.expanduser("~"), "Downloads", "You
 os.makedirs(download_state["dir"], exist_ok=True)
 
 
+# --- Cookie / Authentication state ---
+# YouTube increasingly flags un-authenticated requests as bots. To bypass this
+# we let yt-dlp read cookies from the user's browser (which already has a logged-in
+# YouTube session). The user can also upload a cookies.txt file as a fallback.
+# Possible values:
+#   "none"      – no cookies (default; may be blocked by YouTube bot detection)
+#   "chrome"    – read from Chrome's cookie DB (needs the user logged into YT)
+#   "safari"    – read from Safari (macOS only)
+#   "firefox"   – read from Firefox
+#   "edge"      – read from Microsoft Edge
+#   "brave"     – read from Brave
+#   "file:..."  – absolute path to a Netscape-format cookies.txt
+cookies_state = {"source": "none", "file_path": ""}
+
+
+def _detect_available_browsers():
+    """Return a list of browser keys that look installed on this machine."""
+    candidates = []
+    home = os.path.expanduser("~")
+    if sys.platform == "darwin":
+        paths_to_check = {
+            "chrome":  "/Applications/Google Chrome.app",
+            "edge":    "/Applications/Microsoft Edge.app",
+            "brave":   "/Applications/Brave Browser.app",
+            "firefox": "/Applications/Firefox.app",
+            "safari":  "/Applications/Safari.app",
+        }
+    elif sys.platform == "win32":
+        program_files = [os.environ.get("ProgramFiles", "C:\\Program Files"),
+                         os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)"),
+                         os.environ.get("LocalAppData", "")]
+        paths_to_check = {
+            "chrome":  [os.path.join(p, "Google", "Chrome", "Application", "chrome.exe") for p in program_files],
+            "edge":    [os.path.join(p, "Microsoft", "Edge", "Application", "msedge.exe") for p in program_files],
+            "brave":   [os.path.join(p, "BraveSoftware", "Brave-Browser", "Application", "brave.exe") for p in program_files],
+            "firefox": [os.path.join(p, "Mozilla Firefox", "firefox.exe") for p in program_files],
+        }
+    else:
+        paths_to_check = {}
+
+    for browser, paths in paths_to_check.items():
+        if isinstance(paths, str):
+            candidates.append(browser) if os.path.exists(paths) else None
+        elif isinstance(paths, list):
+            if any(os.path.exists(p) for p in paths):
+                candidates.append(browser)
+
+    # Safari is bundled with macOS and always present — confirm by file
+    if sys.platform == "darwin" and "safari" not in candidates:
+        if os.path.exists(paths_to_check.get("safari", "")):
+            candidates.append("safari")
+    return candidates
+
+
+def _get_cookie_args():
+    """Translate cookies_state into yt-dlp options.
+
+    Returns a dict that can be merged into ydl_opts. Returns empty dict if
+    cookies are disabled or the file path doesn't exist anymore.
+    """
+    source = cookies_state.get("source", "none")
+    if source == "none" or not source:
+        return {}
+    if source == "file":
+        fp = cookies_state.get("file_path", "")
+        if fp and os.path.exists(fp):
+            return {"cookiefile": fp}
+        # file got deleted — silently fall back to no cookies
+        return {}
+    # yt-dlp accepts the browser name (chrome, safari, firefox, ...)
+    # Optionally: {'cookiesfrombrowser': ('chrome',)} for specifying profile
+    return {"cookiesfrombrowser": (source,)}
+
+
 def _detect_proxy_macos():
     """Detect proxy by reading macOS system proxy settings via scutil."""
     try:
@@ -325,6 +399,9 @@ def get_video_info(url):
         proxy = _get_effective_proxy()
         if proxy:
             ydl_opts['proxy'] = proxy
+        cookie_args = _get_cookie_args()
+        if cookie_args:
+            ydl_opts.update(cookie_args)
 
         with YoutubeDL(ydl_opts) as ydl:
             data = ydl.extract_info(url, download=False)
@@ -479,6 +556,9 @@ def start_download(url, quality, download_id):
             proxy = _get_effective_proxy()
             if proxy:
                 ydl_opts['proxy'] = proxy
+            cookie_args = _get_cookie_args()
+            if cookie_args:
+                ydl_opts.update(cookie_args)
 
             # Audio extraction to MP3
             if quality == 'audio' and FFMPEG_BIN:
@@ -568,6 +648,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                 'proxy': effective,
                 'proxy_mode': proxy_state.get('mode', 'auto'),
                 'proxy_auto_url': proxy_state.get('auto_url', ''),
+                'cookies_source': cookies_state.get('source', 'none'),
+                'cookies_file': cookies_state.get('file_path', ''),
+                'available_browsers': _detect_available_browsers(),
                 'platform': sys.platform,
             })
         elif parsed.path == '/api/open-downloads':
@@ -682,6 +765,61 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json({'success': False, 'error': '没有写入权限，请选择其他文件夹'}, 400)
             except Exception as e:
                 self._send_json({'success': False, 'error': f'路径无效：{str(e)}'}, 400)
+
+        elif parsed.path == '/api/cookies':
+            body = self._read_body()
+            if body is None:
+                return
+            source = body.get('source', 'none').strip()
+            file_path = body.get('file_path', '').strip()
+
+            if source == 'none' or not source:
+                cookies_state['source'] = 'none'
+                cookies_state['file_path'] = ''
+                self._send_json({'success': True, 'source': 'none', 'file_path': ''})
+                return
+
+            if source == 'file':
+                if not file_path or not os.path.exists(file_path):
+                    self._send_json({'success': False, 'error': 'cookies 文件不存在'}, 400)
+                    return
+                # Sanity check: cookies.txt should contain at least one YouTube cookie
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        head = f.read(8192)
+                    if 'youtube.com' not in head and 'google.com' not in head:
+                        self._send_json({
+                            'success': False,
+                            'error': '文件中未检测到 YouTube cookies，请确认导出来源',
+                        }, 400)
+                        return
+                except Exception as e:
+                    self._send_json({'success': False, 'error': f'无法读取文件：{e}'}, 400)
+                    return
+                cookies_state['source'] = 'file'
+                cookies_state['file_path'] = file_path
+                self._send_json({
+                    'success': True,
+                    'source': 'file',
+                    'file_path': file_path,
+                })
+                return
+
+            # Browser name like 'chrome', 'safari', 'firefox', 'edge', 'brave'
+            valid_browsers = _detect_available_browsers()
+            if source not in valid_browsers:
+                self._send_json({
+                    'success': False,
+                    'error': f'本机未检测到该浏览器（已安装: {", ".join(valid_browsers) or "无"}）',
+                }, 400)
+                return
+            cookies_state['source'] = source
+            cookies_state['file_path'] = ''
+            self._send_json({
+                'success': True,
+                'source': source,
+                'file_path': '',
+            })
         else:
             self.send_response(404)
             self.end_headers()
@@ -798,6 +936,23 @@ class JsApi:
         except Exception as e:
             return {'success': False, 'error': str(e)}
 
+    def select_file(self, file_types=None):
+        """Open a native file picker (for cookies.txt etc.)."""
+        if not self._window:
+            return {'success': False, 'error': '窗口未初始化'}
+        try:
+            import webview
+            kwargs = {}
+            if file_types:
+                # pywebview expects (label, patterns)
+                kwargs['file_types'] = file_types
+            result = self._window.create_file_dialog(webview.OPEN_DIALOG, **kwargs)
+            if result and len(result) > 0:
+                return {'success': True, 'path': result[0]}
+            return {'success': False, 'error': '未选择文件'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
 
 _js_api = JsApi()
 
@@ -821,6 +976,7 @@ def main():
     print(f"   yt-dlp version: {_get_yt_dlp_version()}")
     print(f"   ffmpeg: {'available' if FFMPEG_BIN else 'not found (high-quality merge may fail)'}")
     print(f"   proxy: {proxy_state.get('url', 'none (direct)')} (mode: {proxy_state.get('mode', 'auto')})")
+    print(f"   cookies: {cookies_state.get('source', 'none')}{' (' + cookies_state['file_path'] + ')' if cookies_state.get('source') == 'file' and cookies_state.get('file_path') else ''}")
 
     # Launch native window via pywebview (macOS WKWebView / Windows Edge WebView2 — no browser needed)
     import webview
