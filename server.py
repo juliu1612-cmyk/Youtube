@@ -394,6 +394,11 @@ def get_video_info(url):
             'noplaylist': True,
             'extractor_args': {'youtube': {'player_client': ['web_creator', 'web', 'android', 'tv_embedded']}},
             'check_formats': 'selected',
+            'socket_timeout': 60,
+            'retries': 10,
+            'fragment_retries': 10,
+            'extractor_retries': 5,
+            'force_ipv4': True,
             'http_headers': {
                 'User-Agent': USER_AGENT,
             },

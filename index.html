@@ -1103,6 +1103,14 @@
             }, 2500);
         }
 
+        // --- Fetch with timeout ---
+        function fetchWithTimeout(url, options, timeoutMs) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+            return fetch(url, { ...options, signal: controller.signal })
+                .finally(() => clearTimeout(timeoutId));
+        }
+
         // --- Fetch Video Info ---
         async function fetchVideoInfo() {
             const url = document.getElementById('urlInput').value.trim();
@@ -1117,11 +1125,11 @@
             btn.innerHTML = '<span class="spinner"></span> 解析中...';
 
             try {
-                const res = await fetch('/api/info', {
+                const res = await fetchWithTimeout('/api/info', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url })
-                });
+                }, 120000);
                 const data = await res.json();
 
                 if (data.success) {
@@ -1131,7 +1139,11 @@
                     showToast(data.error || '解析失败', 'error');
                 }
             } catch (e) {
-                showToast('网络错误：' + e.message, 'error');
+                if (e.name === 'AbortError') {
+                    showToast('解析超时，请检查网络/代理后重试', 'error');
+                } else {
+                    showToast('网络错误：' + e.message, 'error');
+                }
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalText;
@@ -1210,11 +1222,11 @@
             const url = currentVideoInfo.webpage_url || document.getElementById('urlInput').value.trim();
 
             try {
-                const res = await fetch('/api/download', {
+                const res = await fetchWithTimeout('/api/download', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ url, quality: selectedQuality })
-                });
+                }, 120000);
                 const data = await res.json();
 
                 if (data.success) {
@@ -1225,7 +1237,11 @@
                     showToast(data.error || '下载失败', 'error');
                 }
             } catch (e) {
-                showToast('网络错误：' + e.message, 'error');
+                if (e.name === 'AbortError') {
+                    showToast('请求超时，请检查网络/代理后重试', 'error');
+                } else {
+                    showToast('网络错误：' + e.message, 'error');
+                }
             }
         }
 
