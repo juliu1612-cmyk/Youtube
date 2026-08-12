@@ -47,7 +47,10 @@ def _get_app_dir():
 
 
 APP_DIR = _get_app_dir()
-DOWNLOAD_DIR = os.path.join(os.path.expanduser("~"), "Downloads", "YouTubeDownloader")
+
+# --- Download directory state (mutable, can be changed at runtime) ---
+download_state = {"dir": os.path.join(os.path.expanduser("~"), "Downloads", "YouTubeDownloader")}
+os.makedirs(download_state["dir"], exist_ok=True)
 
 
 def _detect_proxy_macos():
@@ -170,20 +173,36 @@ USER_AGENT = _get_user_agent()
 # yt-dlp and ffmpeg paths
 FFMPEG_BIN = shutil.which("ffmpeg")
 
-# Ensure download directory exists
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
 # --- Download State Management ---
 downloads = {}  # {id: {url, title, status, progress, speed, eta, filepath, ...}}
 download_lock = threading.Lock()
 
 # --- Proxy State (can be updated at runtime) ---
-proxy_state = {"url": PROXY_URL}
+# 'mode': 'auto' (use system-detected proxy) or 'manual' (user-specified)
+# 'url':  the effective proxy URL currently in use
+# 'auto_url': the last auto-detected URL (for display / re-detect)
+proxy_state = {"mode": "auto", "url": PROXY_URL, "auto_url": PROXY_URL}
+
+
+def _get_effective_proxy():
+    """Return the proxy URL that should actually be used right now.
+
+    In 'auto' mode, re-run system detection so changes to the OS proxy
+    settings (e.g. toggling Clash on/off) are picked up without restart.
+    In 'manual' mode, use the user-specified value.
+    """
+    if proxy_state.get("mode") == "manual":
+        return proxy_state.get("url", "")
+    # Auto mode: re-detect from system
+    detected = _detect_proxy_auto()
+    proxy_state["auto_url"] = detected
+    return detected
 
 
 def _get_proxy_args():
     """Build yt-dlp proxy arguments"""
-    p = proxy_state.get("url", "")
+    p = _get_effective_proxy()
+    proxy_state["url"] = p  # keep state in sync
     if p:
         return ["--proxy", p]
     return []
@@ -303,7 +322,7 @@ def get_video_info(url):
                 'User-Agent': USER_AGENT,
             },
         }
-        proxy = proxy_state.get('url', '')
+        proxy = _get_effective_proxy()
         if proxy:
             ydl_opts['proxy'] = proxy
 
@@ -401,7 +420,7 @@ def start_download(url, quality, download_id):
             else:
                 fmt = "bestvideo+bestaudio/best" if FFMPEG_BIN else "best"
 
-            output_template = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
+            output_template = os.path.join(download_state["dir"], "%(title)s.%(ext)s")
 
             def progress_hook(d):
                 if d['status'] == 'downloading':
@@ -457,7 +476,7 @@ def start_download(url, quality, download_id):
                 'no_warnings': True,
             }
 
-            proxy = proxy_state.get('url', '')
+            proxy = _get_effective_proxy()
             if proxy:
                 ydl_opts['proxy'] = proxy
 
@@ -492,7 +511,7 @@ def start_download(url, quality, download_id):
                         ext = info.get('ext', 'mp4')
                         title = info.get('title', 'video')
                         safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
-                        downloads[download_id]['filepath'] = os.path.join(DOWNLOAD_DIR, f"{safe_title}.{ext}")
+                        downloads[download_id]['filepath'] = os.path.join(download_state["dir"], f"{safe_title}.{ext}")
 
         except Exception as e:
             error_str = str(e)
@@ -540,16 +559,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                 data = list(downloads.values())
             self._send_json({'success': True, 'downloads': data})
         elif parsed.path == '/api/config':
+            effective = _get_effective_proxy()
             self._send_json({
                 'success': True,
-                'download_dir': DOWNLOAD_DIR,
+                'download_dir': download_state["dir"],
                 'ffmpeg_available': FFMPEG_BIN is not None,
                 'yt_dlp_version': _get_yt_dlp_version(),
-                'proxy': proxy_state.get('url', ''),
+                'proxy': effective,
+                'proxy_mode': proxy_state.get('mode', 'auto'),
+                'proxy_auto_url': proxy_state.get('auto_url', ''),
                 'platform': sys.platform,
             })
         elif parsed.path == '/api/open-downloads':
-            _open_in_file_manager(DOWNLOAD_DIR)
+            _open_in_file_manager(download_state["dir"])
             self._send_json({'success': True})
         else:
             self.send_response(404)
@@ -604,18 +626,62 @@ class RequestHandler(BaseHTTPRequestHandler):
             body = self._read_body()
             if body is None:
                 return
+            mode = body.get('mode', '').strip()  # 'auto' or 'manual'
             proxy_url = body.get('proxy', '').strip()
-            proxy_state['url'] = proxy_url
-            # Also update environment for subprocess inheritance
-            if proxy_url:
-                os.environ['http_proxy'] = proxy_url
-                os.environ['https_proxy'] = proxy_url
-                os.environ['HTTP_PROXY'] = proxy_url
-                os.environ['HTTPS_PROXY'] = proxy_url
+
+            if mode == 'auto':
+                # Switch to auto-detect mode and re-run detection
+                proxy_state['mode'] = 'auto'
+                detected = _detect_proxy_auto()
+                proxy_state['auto_url'] = detected
+                proxy_state['url'] = detected
+                effective = detected
+            else:
+                # Manual mode: use user-specified proxy (can be empty = direct)
+                proxy_state['mode'] = 'manual'
+                proxy_state['url'] = proxy_url
+                effective = proxy_url
+
+            # Update environment for subprocess inheritance
+            if effective:
+                os.environ['http_proxy'] = effective
+                os.environ['https_proxy'] = effective
+                os.environ['HTTP_PROXY'] = effective
+                os.environ['HTTPS_PROXY'] = effective
             else:
                 for key in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
                     os.environ.pop(key, None)
-            self._send_json({'success': True, 'proxy': proxy_url})
+
+            self._send_json({
+                'success': True,
+                'proxy': effective,
+                'mode': proxy_state['mode'],
+                'auto_url': proxy_state.get('auto_url', ''),
+            })
+
+        elif parsed.path == '/api/download-dir':
+            body = self._read_body()
+            if body is None:
+                return
+            new_dir = body.get('dir', '').strip()
+            if not new_dir:
+                self._send_json({'success': False, 'error': '路径不能为空'}, 400)
+                return
+            try:
+                # Expand ~ and resolve path
+                new_dir = os.path.expanduser(new_dir)
+                os.makedirs(new_dir, exist_ok=True)
+                # Verify it's writable
+                test_file = os.path.join(new_dir, '.write_test')
+                with open(test_file, 'w') as f:
+                    f.write('ok')
+                os.remove(test_file)
+                download_state["dir"] = new_dir
+                self._send_json({'success': True, 'download_dir': new_dir})
+            except PermissionError:
+                self._send_json({'success': False, 'error': '没有写入权限，请选择其他文件夹'}, 400)
+            except Exception as e:
+                self._send_json({'success': False, 'error': f'路径无效：{str(e)}'}, 400)
         else:
             self.send_response(404)
             self.end_headers()
@@ -710,6 +776,32 @@ def _focus_existing_window():
             pass
 
 
+class JsApi:
+    """JavaScript bridge: exposes Python functions to the frontend via pywebview."""
+
+    def __init__(self):
+        self._window = None
+
+    def set_window(self, w):
+        self._window = w
+
+    def select_folder(self):
+        """Open a native OS folder picker and return the selected path."""
+        if not self._window:
+            return {'success': False, 'error': '窗口未初始化'}
+        try:
+            import webview
+            result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+            if result and len(result) > 0:
+                return {'success': True, 'path': result[0]}
+            return {'success': False, 'error': '未选择文件夹'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+
+_js_api = JsApi()
+
+
 def main():
     # ---- Single-instance guard ----
     if _is_existing_instance_alive():
@@ -725,10 +817,10 @@ def main():
     server_thread.start()
     print(f"🎵 YouTube Downloader")
     print(f"   Server running at http://{HOST}:{PORT}")
-    print(f"   Download directory: {DOWNLOAD_DIR}")
+    print(f"   Download directory: {download_state['dir']}")
     print(f"   yt-dlp version: {_get_yt_dlp_version()}")
     print(f"   ffmpeg: {'available' if FFMPEG_BIN else 'not found (high-quality merge may fail)'}")
-    print(f"   proxy: {proxy_state.get('url', 'none (direct connection)')}")
+    print(f"   proxy: {proxy_state.get('url', 'none (direct)')} (mode: {proxy_state.get('mode', 'auto')})")
 
     # Launch native window via pywebview (macOS WKWebView / Windows Edge WebView2 — no browser needed)
     import webview
@@ -739,7 +831,9 @@ def main():
         height=700,
         min_size=(700, 500),
         text_select=True,
+        js_api=_js_api,
     )
+    _js_api.set_window(window)
     webview.start()  # Blocks until the window is closed
 
     # Window closed → shut down the server and exit

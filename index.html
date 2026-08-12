@@ -749,20 +749,32 @@
             <div class="modal-body">
                 <div class="info-banner">
                     <span>💡</span>
-                    <span>在中国大陆访问 YouTube 需要代理/VPN。请填写你的代理地址（如 Clash/V2Ray 的本地端口），留空则使用系统默认代理。</span>
+                    <span>应用会自动读取系统代理设置，无需手动配置。如果代理未生效，可点击「重新检测」或切换到手动模式。</span>
                 </div>
                 <div class="form-group">
-                    <label>代理地址</label>
-                    <input type="text" id="proxyInput" placeholder="http://127.0.0.1:7890" autocomplete="off">
-                    <div class="hint">
-                        常见代理端口：Clash 默认 7890，V2Ray 默认 1080/1087，SSR 默认 1080<br>
-                        示例：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
+                    <label>网络代理</label>
+                    <div id="proxyStatusBox" style="padding:12px 14px;border-radius:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);margin-bottom:10px;">
+                        <div id="proxyStatusText" style="font-size:14px;">检测中...</div>
+                    </div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button class="btn btn-secondary" onclick="redetectProxy()" style="font-size:13px;padding:6px 14px;">🔄 重新检测</button>
+                        <button class="btn btn-secondary" id="toggleManualBtn" onclick="toggleManualProxy()" style="font-size:13px;padding:6px 14px;">✏️ 手动指定</button>
+                    </div>
+                    <div id="manualProxyBox" style="display:none;margin-top:10px;">
+                        <input type="text" id="proxyInput" placeholder="http://127.0.0.1:7890" autocomplete="off">
+                        <div class="hint">
+                            常见代理端口：Clash 默认 7890/7897，V2Ray 默认 1080/1087<br>
+                            示例：http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
+                        </div>
                     </div>
                 </div>
                 <div class="form-group">
                     <label>下载路径</label>
-                    <input type="text" id="downloadDirInput" readonly>
-                    <div class="hint">视频默认保存到 ~/Downloads/YouTubeDownloader/</div>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <input type="text" id="downloadDirInput" readonly style="flex:1;">
+                        <button class="btn btn-secondary" onclick="selectDownloadFolder()" style="white-space:nowrap;font-size:13px;padding:6px 14px;flex-shrink:0;">📂 选择</button>
+                    </div>
+                    <div class="hint">点击「选择」按钮更改下载位置</div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -781,6 +793,12 @@
         let pollTimer = null;
         let pollInterval = 1000;
         let renderedItems = new Map(); // download id -> DOM element
+        let pywebviewReady = false;
+
+        // Listen for pywebview JS API readiness
+        window.addEventListener('pywebviewready', function() {
+            pywebviewReady = true;
+        });
 
         // --- Initialize ---
         async function init() {
@@ -794,9 +812,7 @@
                     }
                     document.getElementById('downloadDir').textContent = '📁 ' + data.download_dir;
                     document.getElementById('downloadDirInput').value = data.download_dir;
-                    if (data.proxy) {
-                        document.getElementById('proxyInput').value = data.proxy;
-                    }
+                    updateProxyUI(data.proxy, data.proxy_mode, data.proxy_auto_url);
                 }
             } catch (e) {
                 console.error('Config fetch error:', e);
@@ -813,17 +829,123 @@
             document.getElementById('settingsModal').classList.remove('visible');
         }
 
-        async function saveSettings() {
-            const proxy = document.getElementById('proxyInput').value.trim();
+        function updateProxyUI(proxy, mode, autoUrl) {
+            const statusBox = document.getElementById('proxyStatusBox');
+            const statusText = document.getElementById('proxyStatusText');
+            const manualBox = document.getElementById('manualProxyBox');
+            const toggleBtn = document.getElementById('toggleManualBtn');
+
+            if (mode === 'manual') {
+                manualBox.style.display = 'block';
+                toggleBtn.textContent = '✅ 自动检测';
+                if (proxy) {
+                    statusText.innerHTML = '✏️ <strong>手动模式</strong>：' + proxy;
+                    statusBox.style.background = 'rgba(255,180,0,0.08)';
+                    statusBox.style.borderColor = 'rgba(255,180,0,0.3)';
+                } else {
+                    statusText.innerHTML = '✏️ <strong>手动模式</strong>：直连（无代理）';
+                    statusBox.style.background = 'rgba(255,255,255,0.05)';
+                    statusBox.style.borderColor = 'rgba(255,255,255,0.1)';
+                }
+                document.getElementById('proxyInput').value = proxy || '';
+            } else {
+                // Auto mode
+                manualBox.style.display = 'none';
+                toggleBtn.textContent = '✏️ 手动指定';
+                if (proxy) {
+                    statusText.innerHTML = '✅ <strong>已自动检测到代理</strong><br><span style="opacity:0.7;font-size:13px;">' + proxy + '</span>';
+                    statusBox.style.background = 'rgba(76,175,80,0.1)';
+                    statusBox.style.borderColor = 'rgba(76,175,80,0.3)';
+                } else {
+                    statusText.innerHTML = '⚠️ <strong>未检测到代理</strong><br><span style="opacity:0.7;font-size:13px;">请确保 VPN/代理已开启并设置了系统代理</span>';
+                    statusBox.style.background = 'rgba(255,152,0,0.08)';
+                    statusBox.style.borderColor = 'rgba(255,152,0,0.3)';
+                }
+            }
+        }
+
+        async function redetectProxy() {
             try {
                 const res = await fetch('/api/proxy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ proxy })
+                    body: JSON.stringify({ mode: 'auto' })
                 });
                 const data = await res.json();
                 if (data.success) {
-                    showToast(proxy ? '代理已保存' : '已清除代理设置', 'success');
+                    updateProxyUI(data.proxy, data.mode, data.auto_url);
+                    showToast(data.proxy ? '检测到代理：' + data.proxy : '未检测到代理', data.proxy ? 'success' : '');
+                }
+            } catch (e) {
+                showToast('检测失败', 'error');
+            }
+        }
+
+        function toggleManualProxy() {
+            const manualBox = document.getElementById('manualProxyBox');
+            const currentMode = manualBox.style.display === 'none' ? 'auto' : 'manual';
+            if (currentMode === 'auto') {
+                // Switch to manual
+                manualBox.style.display = 'block';
+                document.getElementById('toggleManualBtn').textContent = '✅ 自动检测';
+            } else {
+                // Switch back to auto
+                manualBox.style.display = 'none';
+                document.getElementById('toggleManualBtn').textContent = '✏️ 手动指定';
+            }
+        }
+
+        async function selectDownloadFolder() {
+            // Wait for pywebview API if not ready yet
+            if (!pywebviewReady) {
+                // Try waiting a bit in case the event hasn't fired yet
+                for (let i = 0; i < 10; i++) {
+                    if (window.pywebview && window.pywebview.api) { pywebviewReady = true; break; }
+                    await new Promise(r => setTimeout(r, 200));
+                }
+            }
+            if (!pywebviewReady || !window.pywebview || !window.pywebview.api) {
+                showToast('文件夹选择功能不可用', 'error');
+                return;
+            }
+            try {
+                const raw = await pywebview.api.select_folder();
+                const result = typeof raw === 'string' ? JSON.parse(raw) : raw;
+                if (result && result.success && result.path) {
+                    // Save to backend immediately
+                    const res = await fetch('/api/download-dir', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ dir: result.path })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        document.getElementById('downloadDirInput').value = result.path;
+                        document.getElementById('downloadDir').textContent = '📁 ' + result.path;
+                        showToast('下载路径已更新', 'success');
+                    } else {
+                        showToast(data.error || '路径设置失败', 'error');
+                    }
+                }
+            } catch (e) {
+                showToast('选择文件夹失败：' + e.message, 'error');
+            }
+        }
+
+        async function saveSettings() {
+            const manualBox = document.getElementById('manualProxyBox');
+            const isManual = manualBox.style.display !== 'none';
+            const proxy = document.getElementById('proxyInput').value.trim();
+            const mode = isManual ? 'manual' : 'auto';
+            try {
+                const res = await fetch('/api/proxy', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ mode: mode, proxy: proxy })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast(mode === 'auto' ? '已切换到自动检测模式' : '代理已保存', 'success');
                     closeSettings();
                 } else {
                     showToast('保存失败', 'error');
