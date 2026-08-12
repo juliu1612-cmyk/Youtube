@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
 
@@ -20,9 +20,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install yt-dlp pywebview pyinstaller
 
-      - name: Build macOS .app (universal2 - supports Intel & Apple Silicon)
+      - name: Build macOS .app (Intel x86_64)
         run: |
-          pyinstaller YouTubeDownloader_Mac.spec --noconfirm --clean --target-arch=universal2
+          pyinstaller YouTubeDownloader_Mac.spec --noconfirm --clean
 
       - name: Create .dmg
         run: |
