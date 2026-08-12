@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-13
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -15,14 +15,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install dependencies (x86_64 via Rosetta)
         run: |
-          python -m pip install --upgrade pip
-          pip install yt-dlp pywebview pyinstaller
+          arch -x86_64 python -m pip install --upgrade pip
+          arch -x86_64 pip install yt-dlp pywebview pyinstaller
 
       - name: Build macOS .app (Intel x86_64)
         run: |
-          pyinstaller YouTubeDownloader_Mac.spec --noconfirm --clean
+          arch -x86_64 pyinstaller YouTubeDownloader_Mac.spec --noconfirm --clean
 
       - name: Create .dmg
         run: |
