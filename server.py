@@ -295,6 +295,7 @@ _ERROR_PATTERNS = [
     (r"This video is unavailable","视频不可用（已删除、地区限制或需要登录）。"),
     (r"Connection refused",       "无法连接到 YouTube，请检查代理设置（右上角 ⚙️）。"),
     (r"timed out",                "连接超时，可能是网络问题。请检查代理/VPN 是否正常工作。"),
+    (r"Requested format is not available", "请求的画质格式不可用。请尝试选择「最佳画质」或其他分辨率重试。"),
     (r"Unable to download.*format","没有匹配该画质的格式，请换其他画质重试。"),
     (r"No suitable extractor",    "yt-dlp 不支持这个视频网站。"),
     (r"EOF occurred in violation", "网络连接中断，请重试。"),
@@ -391,7 +392,8 @@ def get_video_info(url):
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'extractor_args': {'youtube': {'player_client': ['web', 'android']}},
+            'extractor_args': {'youtube': {'player_client': ['web_creator', 'web', 'android', 'tv_embedded']}},
+            'check_formats': 'selected',
             'http_headers': {
                 'User-Agent': USER_AGENT,
             },
@@ -483,19 +485,27 @@ def start_download(url, quality, download_id):
         try:
             from yt_dlp import YoutubeDL
 
-            # Build format string
+            # Build format string — multiple fallback levels for resilience
             if quality == 'audio':
                 fmt = "bestaudio/best"
             elif quality == 'best':
-                fmt = "bestvideo+bestaudio/best" if FFMPEG_BIN else "best"
+                if FFMPEG_BIN:
+                    fmt = "bestvideo+bestaudio/bestvideo*+bestaudio/best"
+                else:
+                    fmt = "best/bestvideo*+bestaudio"
             elif quality.endswith('p'):
                 height = quality[:-1]
                 if FFMPEG_BIN:
-                    fmt = f"bestvideo[height<={height}]+bestaudio/best[height<={height}]/best"
+                    fmt = (
+                        f"bestvideo[height<={height}]+bestaudio/"
+                        f"bestvideo*[height<={height}]+bestaudio/"
+                        f"best[height<={height}]+bestaudio/"
+                        f"best[height<={height}]/best"
+                    )
                 else:
                     fmt = f"best[height<={height}]/best"
             else:
-                fmt = "bestvideo+bestaudio/best" if FFMPEG_BIN else "best"
+                fmt = "bestvideo+bestaudio/bestvideo*+bestaudio/best" if FFMPEG_BIN else "best"
 
             output_template = os.path.join(download_state["dir"], "%(title)s.%(ext)s")
 
@@ -529,7 +539,8 @@ def start_download(url, quality, download_id):
                 'outtmpl': output_template,
                 'noplaylist': True,
                 'progress_hooks': [progress_hook],
-                'extractor_args': {'youtube': {'player_client': ['web', 'android']}},
+                'extractor_args': {'youtube': {'player_client': ['web_creator', 'web', 'android', 'tv_embedded']}},
+                'check_formats': 'selected',
                 # ── Network resilience ────────────────────────────────────────
                 # YouTube serves video fragments from dozens of GoogleVideo CDN
                 # edge nodes (rr5---sn-*.googlevideo.com). Any single one of
